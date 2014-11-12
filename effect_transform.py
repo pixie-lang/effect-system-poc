@@ -2,9 +2,8 @@ from byteplay import *
 from pprint import pprint
 import dis as dis
 import types
+from effects import *
 
-def answer(x):
-    return Answer(x)
 
 iname = 0
 SELF_NAME = "__SELF__"
@@ -15,7 +14,6 @@ STATE_NAME = "_K_state"
 def cps(f):
     global iname
     c = Code.from_code(f.func_code)
-    pprint(c.code)
 
     iname += 1
     cls_name = "_K_" + str(iname) + "_class"
@@ -23,7 +21,7 @@ def cps(f):
     code = c.code
     ret_points = []
     locals = set(f.func_code.co_varnames[:f.func_code.co_argcount])
-    print locals, "locals <<<--"
+
     i = 0
     while i < len(code):
         nm, arg = code[i]
@@ -37,8 +35,8 @@ def cps(f):
 
         if nm == CALL_METHOD:
             op, arg = code[i - arg - 1]
-            assert op == LOAD_ATTR
-            if arg == "invoke":
+            assert op == LOAD_ATTR, (op, code)
+            if arg.endswith("_") and not arg.startswith("_"):
                 i += 1
                 code.insert(i, (STORE_FAST, RET_NAME))
                 i += 1
@@ -47,12 +45,6 @@ def cps(f):
                 code.insert(i, (CALL_FUNCTION, 0))
                 i += 1
                 code.insert(i, (STORE_FAST, BUILDING_NAME))
-                i += 1
-                code.insert(i, (LOAD_FAST, RET_NAME))
-                i += 1
-                code.insert(i, (LOAD_FAST, BUILDING_NAME))
-                i += 1
-                code.insert(i, (STORE_ATTR, "_K_v"))
                 i += 1
                 code.insert(i, (LOAD_FAST, BUILDING_NAME))
                 i += 1
@@ -72,6 +64,15 @@ def cps(f):
 
                 code.insert(i, (LOAD_FAST, BUILDING_NAME))
                 i += 1
+                code.insert(i, (LOAD_CONST, handle))
+                i += 1
+                code.insert(i, (LOAD_FAST, RET_NAME))
+                i += 1
+                code.insert(i, (LOAD_FAST, BUILDING_NAME))
+                i += 1
+                code.insert(i, (CALL_FUNCTION, 2))
+                i += 1
+
                 code.insert(i, (RETURN_VALUE, None))
                 i += 1
                 lbl = Label()
@@ -143,7 +144,7 @@ def cps(f):
 
     dis.dis(new_func)
 
-    f.func_globals[cls_name] = type(cls_name, (Fn,), {"step": new_func})
+    f.func_globals[cls_name] = type(cls_name, (Continuation,), {"step": new_func, "_immutable_": True})
 
     code = [(LOAD_GLOBAL, cls_name),
             (CALL_FUNCTION, 0),
@@ -173,12 +174,7 @@ def cps(f):
 
     return f
 
-class EffectOrAnswer(object):
-    pass
 
-class Answer(EffectOrAnswer):
-    def __init__(self, w_val):
-        self._w_val = w_val
 
 class Fn(object):
     def invoke(self, x):
