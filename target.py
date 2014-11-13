@@ -348,7 +348,9 @@ add = Add()
 x = intern("x")
 countup = intern("countup")
 inc = intern("inc")
-inc_fn = PixieFunction(inc)
+
+inc_fn = PixieFunction(inc, [x],
+                       Call(Constant(add), [Lookup(x), Constant(Integer(1))]))
 
 literal = PixieFunction(countup, [x],
                         If(Call(Constant(eq), [Lookup(x), Constant(Integer(10000))]),
@@ -364,7 +366,8 @@ ast1 = Call(Constant(add), [If(Lookup(x),
                     Constant(Integer(1))])
 
 ast2 = Bind(countup, FnLiteral(literal),
-            Call(Lookup(countup), [Constant(Integer(0))]))
+            Bind(inc, FnLiteral(inc_fn),
+            Call(Lookup(countup), [Constant(Integer(0))])))
 
 ## JIT stuff
 
@@ -457,4 +460,5 @@ def target(*args):
 
 if __name__ == "__main__":
     import sys
-    run_debug(["f"])
+    #run_debug(["f"])
+    run([1])
