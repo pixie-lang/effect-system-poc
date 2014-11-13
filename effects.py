@@ -23,6 +23,9 @@ class Thunk(EffectObject):
     def execute_thunk(self):
         raise NotImplementedError()
 
+    def get_loc(self):
+        return (None, None)
+
 class Continuation(object):
     _immutable_= True
     def step(self, x):
@@ -64,6 +67,9 @@ class CallEffectFn(Thunk):
     def execute_thunk(self):
         return handle_with(self._handler, self._effect.execute_thunk(), self._k)
 
+    def get_loc(self):
+        return self._effect.get_loc()
+
 
 class HandleRecFn(Handler):
     _immutable_ = True
@@ -95,5 +101,8 @@ class DefaultHandlerFn(Thunk):
 
     def execute_thunk(self):
         return self._k.step(self._val)
+
+    def get_loc(self):
+        return (None, None)
 
 ## End Default Handler
