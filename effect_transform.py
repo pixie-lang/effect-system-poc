@@ -62,7 +62,6 @@ def cps(f):
     while code.inbounds():
         nm, arg = code[0]
 
-        print nm, arg, locals
 
         if nm == STORE_FAST:
             locals.add(arg)
@@ -93,7 +92,7 @@ def cps(f):
                 continue
 
             op, arg = code[- (arg + 1)]
-            print op, arg
+
             if (op == LOAD_ATTR or op == LOAD_GLOBAL) and arg.endswith("_") and not arg.startswith("_"):
                 code.next()
                 code.insert(STORE_FAST, RET_NAME)
@@ -128,7 +127,6 @@ def cps(f):
                     code.insert(STORE_FAST, x)
 
                 continue
-                print op, arg
 
         if nm == RETURN_VALUE:
             code.insert(STORE_FAST, RET_NAME)
@@ -161,7 +159,6 @@ def cps(f):
         state_idx += 1
 
 
-    pprint(code.get_code())
     c = Code(code=code.get_code(), freevars=[], args=[BUILDING_NAME, RET_NAME],
              varargs=False, varkwargs=False, newlocals=True, name=f.func_code.co_name,
              filename=f.func_code.co_filename, firstlineno=f.func_code.co_firstlineno,
