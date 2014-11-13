@@ -33,6 +33,28 @@ nil = Nil()
 
 ## Interpret and Thunks
 
+def clone_append(arr, itm):
+    new_array = [None] * (len(arr) + 1)
+    x = 0
+    while x < len(arr):
+        new_array[x] = arr[x]
+        x += 1
+    new_array[x] = itm
+    return new_array
+
+@cps
+def interpret_items_(args_w, env):
+    new_args = []
+    idx = 0
+
+    while idx < len(args_w):
+        result = args_w[idx].interpret_(env)
+        new_args = clone_append(new_args, result)
+        idx += 1
+
+    return new_args
+
+
 def interpret(x, env):
     assert isinstance(x, Syntax)
     jitdriver.jit_merge_point(ast=x, env=env)
@@ -72,10 +94,17 @@ class Env(Object):
         self._globals = globals
 
     def lookup_local(self, nm):
-        return self._locals.get(nm, None)
+        return self._locals.get(nm)
 
     def lookup_(self, nm):
-        return Answer(self._locals.get(nm, None))
+        return Answer(self._locals[nm])
+
+    def with_locals(self, names, values):
+        locals = self._locals.copy()
+        for x in range(len(names)):
+            locals[names[x]] = values[x]
+
+        return Env(locals, self._globals)
 
 def lookup_(env, sym):
     val = env.lookup_local(sym)
@@ -99,7 +128,7 @@ class Constant(Syntax):
 
 class Lookup(Syntax):
     _immutable_ = True
-    def __init__(self, name, env = None):
+    def __init__(self, name):
         self._name = name
 
     @cps
@@ -120,22 +149,131 @@ class If(Syntax):
     @cps
     def interpret_(self, env):
         tst = self._w_test.interpret_(env)
+        ret = None
         if not (tst is nil or tst is false):
-            ret = self._w_then.interpret_(env)
-            return ret
+            return self._w_then.interpret_(env)
         else:
-            ret = self._w_else.interpret_(env)
-            return ret
+            return self._w_else.interpret_(env)
+
+class Do(Syntax):
+    _immutable_ = True
+    def __init__(self, exprs):
+        self._exprs_w = exprs
+
+    @cps
+    def interpret_(self, env):
+        x = 0
+        result = nil
+        while x < len(self._exprs_w):
+            result = self._exprs_w[x].interpret_(env)
+            x += 1
+
+        return result
+
+class Call(Syntax):
+    _immutable_ = True
+    def __init__(self, fn, args):
+        self._w_fn = fn
+        self._args_w = args
+
+    @cps
+    def interpret_(self, env):
+        fn = self._w_fn.interpret_(env)
+        args_w = self._args_w
+        itms = interpret_items_(args_w, env)
+        return fn.invoke_(itms)
+
+class RecurHandler(Handler):
+    def __init__(self, f, env):
+        pass
+
+    def handle(self, effect, k):
+        pass
+
+
+
+class Add(Fn):
+    def __index__(self):
+        pass
+
+    def invoke_(self, args):
+        return Answer(Integer(args[0].int_val() + args[1].int_val()))
+
+
+class EQ(Fn):
+    def __index__(self):
+        pass
+
+    def invoke_(self, args):
+        result = args[0].int_val() == args[1].int_val()
+        return Answer(true if result else false)
+
+class FnLiteral(Syntax):
+    def __init__(self, fn):
+        self._w_fn = fn
+
+    def interpret_(self, env):
+        return Answer(self._w_fn.with_env(env))
+
+class PixieFunction(Fn):
+    _immutable_ = True
+    def __init__(self, name, arg_names, code, env = None):
+        self._w_code = code
+        self._arg_names = arg_names
+        self._env = env
+        self._name = name
+
+    def with_env(self, env):
+        return PixieFunction(self._name, self._arg_names, self._w_code, env)
+
+
+    def invoke_(self, args):
+        new_env = self._env.with_locals(self._arg_names, args)
+        new_env = new_env.with_locals([self._name], [self])
+        return self._w_code.interpret_(new_env)
+
+
+class Bind(Syntax):
+    def __init__(self, nm, ast, body):
+        self._nm = nm
+        self._w_ast = ast
+        self._w_body = body
+
+    @cps
+    def interpret_(self, env):
+        result = self._w_ast.interpret_(env)
+        new_env = env.with_locals([self._nm], [result])
+        result = self._w_body.interpret_(new_env)
+        return result
 
 ## End If Syntax
 
-ast1 = If(Lookup("x"),
-             Constant(Integer(42)),
-             Constant(nil))
+eq = EQ()
+add = Add()
 
-ast2 = If(Lookup("x"),
-             Constant(Integer(43)),
-             Constant(nil))
+literal = PixieFunction("countup", ["x"],
+                        If(Call(Constant(eq), [Lookup("x"), Constant(Integer(10))]),
+                           Lookup("x"),
+                           Call(Lookup("countup"),
+                                [Call(Constant(add), [Lookup("x"), Constant(Integer(1))])])))
+
+env = Env({}, None)
+
+ast1 = Call(Constant(add), [If(Lookup("x"),
+             Do([Constant(Integer(42)),
+                Constant(Integer(1))]),
+             Do([Constant(nil),
+                 Constant(nil)])),
+                    Constant(Integer(1))])
+
+ast2 = Bind("countup", FnLiteral(literal),
+            Call(Lookup("countup"), [Constant(Integer(0))]))
+
+ast1 = If(Lookup("x"),
+             Do([Constant(Integer(42)),
+                 Constant(Integer(1))]),
+             Do([Constant(nil),
+                 Constant(nil)]))
 
 ## JIT stuff
 
@@ -152,9 +290,9 @@ def run(argv):
     ast = [ast1, ast2][len(argv)]
 
     result = None
-    for x in range(10000):
-        result = interpret_effect(ast, Env({"x": true}, None))
-    print result
+    for x in range(1):
+        result = interpret_effect(ast, env)
+    print result.val().int_val()
 
 def entry_point(argv):
     run(argv)

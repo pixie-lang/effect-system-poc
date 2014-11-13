@@ -25,18 +25,40 @@ def cps(f):
     i = 0
     while i < len(code):
         nm, arg = code[i]
+
+        print nm, arg
+
         if nm == STORE_FAST:
             locals.add(arg)
+
         if nm == LOOKUP_METHOD:
             code[i] = (LOAD_ATTR, arg)
 
         if nm == CALL_METHOD:
             code[i] = (CALL_FUNCTION, arg)
 
-        if nm == CALL_METHOD:
+        if nm == SETUP_LOOP:
+            code[i] = (NOP, None)
+
+        if nm == POP_BLOCK:
+            code[i] = (NOP, None)
+
+        if nm == BREAK_LOOP:
+            raise AssertionError("Can't use break inside a CPS function")
+
+        if nm == CONTINUE_LOOP:
+            raise AssertionError("Can't use continue inside a CPS function")
+
+        if nm == CALL_METHOD or nm == CALL_FUNCTION:
+            op, _ = code[i + 1]
+            if op == RETURN_VALUE:
+                print "SKIPPING RETURN"
+                i += 2
+                continue
+
             op, arg = code[i - arg - 1]
-            assert op == LOAD_ATTR, (op, code)
-            if arg.endswith("_") and not arg.startswith("_"):
+            print op, arg
+            if (op == LOAD_ATTR or op == LOAD_GLOBAL) and arg.endswith("_") and not arg.startswith("_"):
                 i += 1
                 code.insert(i, (STORE_FAST, RET_NAME))
                 i += 1
@@ -90,6 +112,7 @@ def cps(f):
                     code.insert(i, (STORE_FAST, x))
                     i += 1
 
+                continue
                 print op, arg
 
         if nm == RETURN_VALUE:
@@ -102,8 +125,8 @@ def cps(f):
             code.insert(i, (CALL_FUNCTION, 1))
             i += 1
 
-
         i += 1
+
 
     i = 0
     for x in f.func_code.co_varnames[:f.func_code.co_argcount]:
@@ -140,7 +163,12 @@ def cps(f):
              filename=f.func_code.co_filename, firstlineno=f.func_code.co_firstlineno,
              docstring=f.func_code.__doc__)
 
-    new_func = types.FunctionType(c.to_code(), f.func_globals, "step")
+    try:
+        new_func = types.FunctionType(c.to_code(), f.func_globals, "step")
+    except:
+        print f.func_code.co_name
+        pprint(code)
+        raise
 
     dis.dis(new_func)
 
