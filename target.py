@@ -113,14 +113,19 @@ def interpret_effect(ast, env):
         if isinstance(result, Thunk):
             f = result
             continue
-        if isinstance(result, Answer):
+        elif isinstance(result, Answer):
             return result
 
-        if isinstance(result, Resolve):
+        elif isinstance(result, Resolve):
             result = result._k.step(jit.promote(defs.get(result._name, None)))
             assert isinstance(result, Thunk)
             f = result
 
+        elif isinstance(result, ExceptionEffect):
+            raise Exception(result._w_msg)
+
+        else:
+            raise NotImplementedError()
 
 
 
@@ -151,6 +156,14 @@ class Resolve(Effect):
 
 def resolve_(name):
     return Resolve(name, None)
+
+class ExceptionEffect(Effect):
+    _immutable_ = True
+    def __init__(self, msg):
+        self._w_msg = msg
+
+    def without_k(self):
+        return ExceptionEffect(self._w_msg)
 
 MAX_LOCALS = 1024 * 1024
 NOT_FOUND = MAX_LOCALS + 1
@@ -293,6 +306,52 @@ class Do(Syntax):
 
         return result
 
+class Try(Syntax):
+    _immutable_ = True
+    def __init__(self, body, catch, final):
+        self._w_body = body
+        self._w_catch = catch
+        self._w_finally = final
+
+    def interpret_inner_(self, env):
+        return handle_with(exception_handler(self._w_catch, self._w_finally, env),
+                           Thunk(self._w_body, env),
+                           answer_k)
+
+
+class ExceptionHandler(Handler):
+    def __init__(self, catch, final, env):
+        self._w_catch = catch
+        self._w_finally = final
+        self._w_env = env
+
+    def handle(self, effect, k):
+        if isinstance(effect, Answer):
+            return handle(thunk_(self._w_finally, self._w_env),
+                          ConstantValContinuation(effect.val(), k))
+
+
+
+class AnswerContinuation(Continuation):
+    def __index__(self):
+        pass
+
+    def step(self, x):
+        return answer(x)
+
+answer_k = AnswerContinuation()
+
+class RaiseException(Syntax):
+    def __init__(self, expr):
+        self._w_expr = expr
+
+    @cps
+    def interpret_inner_(self, env):
+        ex = self._w_expr.interpret_(env)
+        eff = ExceptionEffect(ex)
+        ret = raise_(eff)
+        return ret
+
 class ArgList(object):
     _immutable_ = True
     _immutable_fields_ = "_args_w[*]"
@@ -422,7 +481,7 @@ inc_fn = PixieFunction(inc, [x],
 
 literal = PixieFunction(countup, [x],
                         If(Call(Constant(eq), [Lookup(x), Constant(Integer(10000))]),
-                           Lookup(x),
+                           RaiseException(Lookup(x)),
                            Call(Lookup(countup),
                                 [Call(Lookup(inc), [Lookup(x)])])))
 
@@ -528,5 +587,5 @@ def target(*args):
 
 if __name__ == "__main__":
     import sys
-    run_debug(["f"])
-    #run([1])
+    #run_debug(["f"])
+    run([1])
