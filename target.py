@@ -60,7 +60,7 @@ def interpret_items_(args_w, env):
 
     while idx < len(args_w):
         expr = args_w[idx]
-        result = thunk_(expr, env)
+        result = thunk_Ef(expr, env)
         new_args = clone_append(new_args, result)
         idx += 1
 
@@ -70,10 +70,10 @@ def interpret_items_(args_w, env):
 
 def interpret(x, env):
     assert isinstance(x, Syntax)
-    return x.interpret_(env)
+    return x.interpret_Ef(env)
 
 
-def thunk_(expr, env):
+def thunk_Ef(expr, env):
     return ThunkFn(expr, env)
 
 class ThunkFn(Thunk):
@@ -88,7 +88,7 @@ class ThunkFn(Thunk):
     def get_loc(self):
         return (self._expr, self._env)
 
-def thunk_tailcall_(expr, env):
+def thunk_tailcall_Ef(expr, env):
     return TailCallThunkFn(expr, env)
 
 class TailCallThunkFn(Thunk):
@@ -101,7 +101,7 @@ class TailCallThunkFn(Thunk):
         return interpret(self._expr, self._env)
 
 def interpret_effect(ast, env):
-    f = thunk_(ast, env)
+    f = thunk_Ef(ast, env)
 
     defs = {inc: inc_fn}
 
@@ -154,7 +154,7 @@ class Resolve(Effect):
     def without_k(self):
         return Resolve(self._name)
 
-def resolve_(name):
+def resolve_Ef(name):
     return Resolve(name, None)
 
 class ExceptionEffect(Effect):
@@ -194,14 +194,14 @@ class Locals(Object):
         return self._vals[idx]
 
     @cps
-    def lookup_(self, nm):
+    def lookup_Ef(self, nm):
         result = self.lookup_local(nm)
         if result is not None:
             return result
 
 
         op = Resolve(nm)
-        resolved = raise_(op)
+        resolved = raise_Ef(op)
 
         if resolved:
             return resolved
@@ -245,11 +245,11 @@ def lookup_(env, sym):
 
 class Syntax(Object):
     _immutable_ = True
-    def interpret_(self, env):
+    def interpret_Ef(self, env):
 
-        return self.interpret_inner_(env)
+        return self.interpret_inner_Ef(env)
 
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         raise NotImplementedError()
 
 class Constant(Syntax):
@@ -257,7 +257,7 @@ class Constant(Syntax):
     def __init__(self, value):
         self._val = value
 
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         return Answer(self._val)
 
 class Lookup(Syntax):
@@ -266,9 +266,9 @@ class Lookup(Syntax):
         self._name = name
 
     @cps
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         nm = self._name
-        return env.lookup_(nm)
+        return env.lookup_Ef(nm)
 
 ## If Syntax
 
@@ -280,15 +280,15 @@ class If(Syntax):
         self._w_else = w_else
 
     @cps
-    def interpret_inner_(self, env):
-        tst = self._w_test.interpret_(env)
+    def interpret_inner_Ef(self, env):
+        tst = self._w_test.interpret_Ef(env)
         ret = None
         if not (tst is nil or tst is false):
             expr = self._w_then
         else:
             expr = self._w_else
         expr = jit.promote(expr)
-        return thunk_(expr, env)
+        return thunk_Ef(expr, env)
 
 class Do(Syntax):
     _immutable_ = True
@@ -296,12 +296,12 @@ class Do(Syntax):
         self._exprs_w = exprs
 
     @cps
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         x = 0
         result = nil
         while x < len(self._exprs_w):
             expr = self._exprs_w[x]
-            result = thunk_(expr, env)
+            result = thunk_Ef(expr, env)
             x += 1
 
         return result
@@ -313,7 +313,7 @@ class Try(Syntax):
         self._w_catch = catch
         self._w_finally = final
 
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         return handle_with(exception_handler(self._w_catch, self._w_finally, env),
                            Thunk(self._w_body, env),
                            answer_k)
@@ -327,7 +327,7 @@ class ExceptionHandler(Handler):
 
     def handle(self, effect, k):
         if isinstance(effect, Answer):
-            return handle(thunk_(self._w_finally, self._w_env),
+            return handle(thunk_Ef(self._w_finally, self._w_env),
                           ConstantValContinuation(effect.val(), k))
 
 
@@ -342,14 +342,15 @@ class AnswerContinuation(Continuation):
 answer_k = AnswerContinuation()
 
 class RaiseException(Syntax):
+    _immutable_ = True
     def __init__(self, expr):
         self._w_expr = expr
 
     @cps
-    def interpret_inner_(self, env):
-        ex = self._w_expr.interpret_(env)
+    def interpret_inner_Ef(self, env):
+        ex = self._w_expr.interpret_Ef(env)
         eff = ExceptionEffect(ex)
-        ret = raise_(eff)
+        ret = raise_Ef(eff)
         return ret
 
 class ArgList(object):
@@ -385,27 +386,27 @@ class Call(Syntax):
         self._args_w = args
 
     @cps
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         self = jit.promote(self)
         expr = self._w_fn
-        fn = thunk_(expr, env)
+        fn = thunk_Ef(expr, env)
         idx = 0
         args = ArgList()
         arg_exprs = jit.promote(self._args_w)
         argc = jit.promote(len(arg_exprs))
         while idx < argc:
-            result = arg_exprs[idx].interpret_(env)
+            result = arg_exprs[idx].interpret_Ef(env)
             args = args.append(result)
             idx += 1
 
-        return fn.invoke_(args)
+        return fn.invoke_Ef(args)
 
 class Add(Fn):
     _immutable_ = True
     def __index__(self):
         pass
 
-    def invoke_(self, args):
+    def invoke_Ef(self, args):
         return Answer(Integer(args.get_arg(0).int_val() + args.get_arg(1).int_val()))
 
 
@@ -414,7 +415,7 @@ class EQ(Fn):
     def __index__(self):
         pass
 
-    def invoke_(self, args):
+    def invoke_Ef(self, args):
         result = args.get_arg(0).int_val() == args.get_arg(1).int_val()
         return Answer(true if result else false)
 
@@ -423,7 +424,7 @@ class FnLiteral(Syntax):
     def __init__(self, fn):
         self._w_fn = fn
 
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         return Answer(self._w_fn.with_env(env))
 
 class PixieFunction(Fn):
@@ -438,7 +439,7 @@ class PixieFunction(Fn):
         return PixieFunction(self._name, self._arg_names, self._w_code, env)
 
     @jit.unroll_safe
-    def invoke_(self, args):
+    def invoke_Ef(self, args):
         new_env = self._env
         x = 0
         arg_names = jit.promote(self._arg_names)
@@ -447,7 +448,7 @@ class PixieFunction(Fn):
             x += 1
         new_env = new_env.with_locals(jit.promote(self._name), self)
         ast = self._w_code
-        return thunk_tailcall_(ast, new_env)
+        return thunk_tailcall_Ef(ast, new_env)
 
 
 class Bind(Syntax):
@@ -458,12 +459,12 @@ class Bind(Syntax):
         self._w_body = body
 
     @cps
-    def interpret_inner_(self, env):
+    def interpret_inner_Ef(self, env):
         expr = self._w_ast
-        result = thunk_(expr, env)
+        result = thunk_Ef(expr, env)
         new_env = env.with_locals(self._nm, result)
         expr = self._w_body
-        result = thunk_(expr, new_env)
+        result = thunk_Ef(expr, new_env)
         return result
 
 
@@ -571,18 +572,7 @@ def run_debug(argv):
     CodeWriter.debug = True
     run_child(globals(), locals())
 
-class Foo(object):
-    _immutable=True
-    def __init__(self):
-        pass
-
-
-
 def run(argv):
-    z = Foo()
-    if not hasattr(z, "r"):
-        z.r = 42
-
     ast = [ast1, ast2][len(argv)]
 
     result = None

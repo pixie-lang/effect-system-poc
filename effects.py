@@ -70,7 +70,7 @@ class Fn(Object):
     An app-level callable.
     """
     _immutable_ = True
-    def invoke_(self, args):
+    def invoke_Ef(self, args):
         raise NotImplementedError()
 
 def answer(x):
@@ -79,7 +79,7 @@ def answer(x):
     """
     return Answer(x)
 
-def raise_(x, k):
+def raise_Ef(x, k):
     """
     Used inside @cps transformed functions, recognized by @cps, and the k is automatically supplied. Cannot be called
     in return position. Use thusly

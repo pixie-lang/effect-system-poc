@@ -163,19 +163,19 @@ def cps(f):
 
             # is the function we're calling an effect?
             op, arg = code[- (arg + 1)]
-            if (op == LOAD_ATTR or op == LOAD_GLOBAL) and arg.endswith("_") and not arg.startswith("_"):
-                final_fn = raise_ if arg == "raise_" else handle
+            if (op == LOAD_ATTR or op == LOAD_GLOBAL) and arg.endswith("_Ef"):
+                final_fn = raise_Ef if arg == "raise_Ef" else handle
 
                 # If the next opcode is a return, we can tailcall by simply returning the result directly, except
                 # for calls to raise, those take a continuation, so we can't tailcall those
-                if next_op == RETURN_VALUE and next_op != "raise_":
+                if next_op == RETURN_VALUE and next_op != "raise_Ef":
 
                     code.next().next()
                     continue
 
 
                 # are we calling raise_?
-                if arg == "raise_":
+                if arg == "raise_Ef":
                     code[0] = (NOP, None)
 
                 code.next()
