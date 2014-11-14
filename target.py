@@ -103,18 +103,24 @@ class TailCallThunkFn(Thunk):
 def interpret_effect(ast, env):
     f = thunk_(ast, env)
 
+    defs = {inc: inc_fn}
 
     while True:
         (ast, env) = f.get_loc()
         if ast:
-            jitdriver.jit_merge_point(ast=ast, thunk=f, env=env)
+            jitdriver.jit_merge_point(ast=ast, thunk=f, env=env, globals=defs)
         result = f.execute_thunk()
         if isinstance(result, Thunk):
             f = result
             continue
         if isinstance(result, Answer):
             return result
-        assert False
+
+        if isinstance(result, Resolve):
+            result = result._k.step(jit.promote(defs.get(result._name, None)))
+            assert isinstance(result, Thunk)
+            f = result
+
 
 
 
@@ -135,10 +141,23 @@ def intern(nm):
 
     return val
 
+class Resolve(Effect):
+    _immutable_ = True
+    def __init__(self, name):
+        self._name = name
+
+    def without_k(self):
+        return Resolve(self._name)
+
+def resolve_(name):
+    return Resolve(name, None)
+
+MAX_LOCALS = 1024 * 1024
+NOT_FOUND = MAX_LOCALS + 1
 
 class Locals(Object):
-    _immutable_ = True
-   # _virtualizable_ = ["_names[*]", "_vals[*]"]
+    _immutable_fields_ = ["_names[*]", "_vals[*]"]
+    #_virtualizable_ = ["_names[*]", "_vals[*]"]
 
     def __init__(self, names=[], vals=[]):
         self = jit.hint(self, access_directly=True, fresh_virtualizable=True)
@@ -153,16 +172,29 @@ class Locals(Object):
             if nm is val:
                 return x
             x += 1
-        raise NotImplementedError()
+        return NOT_FOUND
 
     def lookup_local(self, nm):
         idx = self.name_idx(nm)
-        if idx == -1:
+        if idx == NOT_FOUND:
             return None
         return self._vals[idx]
 
+    @cps
     def lookup_(self, nm):
-        return Answer(self.lookup_local(nm))
+        result = self.lookup_local(nm)
+        if result is not None:
+            return result
+
+
+        op = Resolve(nm)
+        resolved = raise_(op)
+
+        if resolved:
+            return resolved
+
+
+        raise NotImplementedError()
 
     @jit.unroll_safe
     def with_locals(self, name, val):
@@ -223,8 +255,7 @@ class Lookup(Syntax):
     @cps
     def interpret_inner_(self, env):
         nm = self._name
-        result = env.lookup_(nm)
-        return result
+        return env.lookup_(nm)
 
 ## If Syntax
 
@@ -243,6 +274,7 @@ class If(Syntax):
             expr = self._w_then
         else:
             expr = self._w_else
+        expr = jit.promote(expr)
         return thunk_(expr, env)
 
 class Do(Syntax):
@@ -261,20 +293,53 @@ class Do(Syntax):
 
         return result
 
+class ArgList(object):
+    _immutable_ = True
+    _immutable_fields_ = "_args_w[*]"
+    def __init__(self, args=[]):
+        self._args_w = args
+
+    @jit.unroll_safe
+    def append(self, arg):
+        old_args = self._args_w
+        new_args = [None] * (len(old_args) + 1)
+        x = 0
+        while x < len(old_args):
+            new_args[x] = old_args[x]
+            x += 1
+
+        new_args[len(old_args)] = arg
+        return ArgList(new_args)
+
+    def get_arg(self, idx):
+        return self._args_w[idx]
+
+    def arg_count(self):
+        return len(self._args_w)
+
 class Call(Syntax):
     _immutable_ = True
+    _immutable_fields = ["_args_w[*]", "_w_fn"]
+
     def __init__(self, fn, args):
         self._w_fn = fn
         self._args_w = args
 
     @cps
     def interpret_inner_(self, env):
+        self = jit.promote(self)
         expr = self._w_fn
         fn = thunk_(expr, env)
-        args_w = self._args_w
-        itms = interpret_items_(args_w, env)
-        unwrapped = itms.items()
-        return fn.invoke_(unwrapped)
+        idx = 0
+        args = ArgList()
+        arg_exprs = jit.promote(self._args_w)
+        argc = jit.promote(len(arg_exprs))
+        while idx < argc:
+            result = arg_exprs[idx].interpret_(env)
+            args = args.append(result)
+            idx += 1
+
+        return fn.invoke_(args)
 
 class Add(Fn):
     _immutable_ = True
@@ -282,7 +347,7 @@ class Add(Fn):
         pass
 
     def invoke_(self, args):
-        return Answer(Integer(args[0].int_val() + args[1].int_val()))
+        return Answer(Integer(args.get_arg(0).int_val() + args.get_arg(1).int_val()))
 
 
 class EQ(Fn):
@@ -291,7 +356,7 @@ class EQ(Fn):
         pass
 
     def invoke_(self, args):
-        result = args[0].int_val() == args[1].int_val()
+        result = args.get_arg(0).int_val() == args.get_arg(1).int_val()
         return Answer(true if result else false)
 
 class FnLiteral(Syntax):
@@ -317,10 +382,11 @@ class PixieFunction(Fn):
     def invoke_(self, args):
         new_env = self._env
         x = 0
-        while x < len(args):
-            new_env = new_env.with_locals(self._arg_names[x], args[x])
+        arg_names = jit.promote(self._arg_names)
+        while x < args.arg_count():
+            new_env = new_env.with_locals(arg_names[x], args.get_arg(x))
             x += 1
-        new_env = new_env.with_locals(self._name, self)
+        new_env = new_env.with_locals(jit.promote(self._name), self)
         ast = self._w_code
         return thunk_tailcall_(ast, new_env)
 
@@ -341,6 +407,7 @@ class Bind(Syntax):
         result = thunk_(expr, new_env)
         return result
 
+
 ## End If Syntax
 
 eq = EQ()
@@ -350,13 +417,14 @@ countup = intern("countup")
 inc = intern("inc")
 
 inc_fn = PixieFunction(inc, [x],
-                       Call(Constant(add), [Lookup(x), Constant(Integer(1))]))
+
+                       Call(Constant(add), [Lookup(x), Constant(Integer(1))])).with_env(Locals())
 
 literal = PixieFunction(countup, [x],
                         If(Call(Constant(eq), [Lookup(x), Constant(Integer(10000))]),
                            Lookup(x),
                            Call(Lookup(countup),
-                                [Call(Constant(add), [Lookup(x), Constant(Integer(1))])])))
+                                [Call(Lookup(inc), [Lookup(x)])])))
 
 ast1 = Call(Constant(add), [If(Lookup(x),
              Do([Constant(Integer(42)),
@@ -375,8 +443,8 @@ def get_printable_location(ast):
     return str(ast)
 
 jitdriver = JitDriver(greens=['ast'],
-        reds=['env', 'thunk'],
-       # virtualizables=['env'],
+        reds=['env', 'thunk', 'globals'],
+        #virtualizables=['env'],
         get_printable_location=get_printable_location
 )
 
@@ -451,8 +519,8 @@ def run(argv):
     result = interpret_effect(ast, Locals())
     print result
 
-def entry_point(argv):
-    run(argv)
+def entry_point():
+    run(["f"])
     return 0
 
 def target(*args):
@@ -460,5 +528,5 @@ def target(*args):
 
 if __name__ == "__main__":
     import sys
-    #run_debug(["f"])
-    run([1])
+    run_debug(["f"])
+    #run([1])

@@ -5,6 +5,10 @@ class Object(object):
 class EffectObject(object):
     _immutable_=True
 
+class Effect(EffectObject):
+    _immutable_ = True
+    pass
+
 class Answer(EffectObject):
     _immutable_=True
     def __init__(self, w_val):
@@ -39,7 +43,9 @@ class Fn(Object):
 def answer(x):
     return Answer(x)
 
-
+def raise_(x, k):
+    x._k = k
+    return x
 
 def handle_with(handler, effect, k):
     assert isinstance(effect, EffectObject)
@@ -48,10 +54,31 @@ def handle_with(handler, effect, k):
     else:
         ret = handler.handle(effect, k)
         if ret is None:
-            effect.__stuff = (k)
-            return effect
+            without = effect.without_k()
+            without._k = EffectStepThunk(handler, effect, k)
+
+            return without
         else:
             return ret
+
+class EffectThunk(Thunk):
+    _immutable_ = True
+    def __init__(self, k, val):
+        self._k = k
+        self._val = val
+
+    def execute_thunk(self):
+        return self._k.step(self._val)
+
+class EffectStepThunk(Continuation):
+    _immutable_ = True
+    def __init__(self, handler, effect, k):
+        self._k = k
+        self._effect_k = effect._k
+        self._handler = handler
+
+    def step(self, val):
+        return handle_with(self._handler, EffectThunk(self._effect_k, val), self._k)
 
 
 def handle(effect, k):

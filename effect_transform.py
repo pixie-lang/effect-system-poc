@@ -93,8 +93,14 @@ def cps(f):
 
             op, arg = code[- (arg + 1)]
 
+
             if (op == LOAD_ATTR or op == LOAD_GLOBAL) and arg.endswith("_") and not arg.startswith("_"):
+                final_fn = raise_ if arg == "raise_" else handle
+
+                if arg == "raise_":
+                    code[0] = (NOP, None)
                 code.next()
+
                 code.insert(STORE_FAST, RET_NAME)
                 code.insert(LOAD_GLOBAL, cls_name)
                 code.insert(CALL_FUNCTION, 0)
@@ -109,7 +115,7 @@ def cps(f):
                     code.insert(STORE_ATTR, "_K_" + str(iname) + "_" + x)
 
                 code.insert(LOAD_FAST, BUILDING_NAME)
-                code.insert(LOAD_CONST, handle)
+                code.insert(LOAD_CONST, final_fn)
                 code.insert(LOAD_FAST, RET_NAME)
                 code.insert(LOAD_FAST, BUILDING_NAME)
                 code.insert(CALL_FUNCTION, 2)
