@@ -571,7 +571,18 @@ def run_debug(argv):
     CodeWriter.debug = True
     run_child(globals(), locals())
 
+class Foo(object):
+    _immutable=True
+    def __init__(self):
+        pass
+
+
+
 def run(argv):
+    z = Foo()
+    if not hasattr(z, "r"):
+        z.r = 42
+
     ast = [ast1, ast2][len(argv)]
 
     result = None
@@ -587,5 +598,5 @@ def target(*args):
 
 if __name__ == "__main__":
     import sys
-    #run_debug(["f"])
-    run([1])
+    run_debug(["f"])
+    #run([1])

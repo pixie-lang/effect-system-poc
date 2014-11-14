@@ -13,10 +13,35 @@ modify the environment or the system. Having an interpreter that makes this dist
 1) Any computation in the system could be hinted to the JIT as being pure, thus removable if the arguments to the computation
 are constants.
 
-.....
+2) Support for Generators, Exceptions, and Lightweight threads (among other things) could be added via this approach.
+
+3) With the ability to "pause" a thread and with all blocking IO segregated inside effects, the vm could easily integrate
+async IO libraries such as libuv, removing the need for a GIL.
+
+4) If foreign functions are considered effects (as they should be) then FFI functions could be called in separate threads,
+allowing for parallel execution of C functions.
+
+5) The upcoming STM solution in PyPy works best for computations that do not perform IO. Once again, this effects system
+separates code, allowing for better optimizations.
+
+### Roadmap
+
+As of today, this POC is finished. It works, and the JIT produces very promising results (on par with the current JIT).
+Thus it is now just a matter of refactoring the guts of Pixie to match the new coding styles. Thankfully not much in the
+ `.lisp` files of pixie have to change.
+
+ * Collections - Anything that calls into pixie or RT will need to be refactored with `@cps`
+ * Reader - Will need to be completely refactored. Calling `rdr.read()` can now be an effect, that change will ripple through
+ the rest of the system.
+ * Compiler - Completely re-written, the new interpreter is an AST interpreter. This will however drastically simplify the compiler
+   as it will no longer have to track stacks, save constants, etc.
+ * Interpreter - The AST nodes will replace the interpreter
+ * RT - Completely rewritten, but since it uses vars, it should be simple to perform this
 
 
+### Does this mean we should halt work on Pixie?
 
+No! Development of pixie can still continue, the changes will be merged in as possible to the new development branch.
 
 ### CPS Transform
 
