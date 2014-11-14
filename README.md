@@ -24,6 +24,9 @@ allowing for parallel execution of C functions.
 5) The upcoming STM solution in PyPy works best for computations that do not perform IO. Once again, this effects system
 separates code, allowing for better optimizations.
 
+6) If the interpreter is immutable, then really weird things can be done at runtime, including: forking a interpreter, resuming
+exceptions, re-running a step in the interpreter, even saving the interpreter's state to disk may be possible.
+
 ### Roadmap
 
 As of today, this POC is finished. It works, and the JIT produces very promising results (on par with the current JIT).
